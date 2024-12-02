@@ -1,64 +1,83 @@
 <?php
 
-/*
- * Get rows from file
- * ['7 6 4 2 1', '1 2 7 8 9', '9 7 6 2 1', '1 3 2 4 5']
- * [
- *  '1' => [
- *   '7',
- *   '6',
- *   '4',
- *   '2',
- *   '1'
- *  ],
- *  '2' => [
- *    
- *  ]
- *  ]
- *
- */
+class ReportValidator
+{
+  private array $reports = [];
 
-$file = file_get_contents('day2.input');
-$rows = explode(PHP_EOL, $file);
-foreach ($rows as $row) {
-  $reports[] = explode(" ", $row);
-}
-
-$validReports = 0;
-$reportNumber = 1;
-
-foreach ($reports as $report) {
-  $lastLevel = null;
-  $valid = true;
-  $order = '';
-  foreach ($report as $level) {
-    if ($lastLevel === null) {
-      $lastLevel = $level;
-      continue;
-    }
-
-    $diff = $level - $lastLevel;
-
-    if ($diff >= 1 && $diff <= 3) {
-      $order = $order === 'desc' ? false : "asc";
-    } elseif ($diff <= -1 && $diff >= -3) {
-      $order = $order === 'asc' ? false : "desc";
-    } else {
-      $valid = false;
-      break;
-    }
-
-    if ($order === false) {
-      $valid = false;
-      break;
-    }
-    $lastLevel = $level;
+  public function __construct(string $filePath)
+  {
+    $this->loadReports($filePath);
   }
-  $reportLine = implode(',', $report);
-  if ($valid) echo "Report " . $reportNumber . " is valid." . $reportLine . PHP_EOL;
-  if ($valid) $validReports++;
-  $reportNumber++;
+
+  private function loadReports(string $filePath): void
+  {
+    $fileContent = file_get_contents($filePath);
+    $rows = explode(PHP_EOL, $fileContent);
+    foreach ($rows as $row) {
+      $this->reports[] = explode(" ", $row);
+    }
+  }
+
+  public function validateReports(): void
+  {
+    $reportNumber = 1;
+    $perfectValidCount = 0;
+    $failedOnceCount = 0;
+
+    foreach ($this->reports as $report) {
+      $isPerfectlyValid = $this->isValidSequence($report);
+      $canBeMadeValid = $this->canBeMadeValid($report);
+
+      if ($isPerfectlyValid) {
+        $perfectValidCount++;
+      } elseif ($canBeMadeValid) {
+        $failedOnceCount++;
+      }
+
+      $reportNumber++;
+    }
+    $problemDampenerCount = $perfectValidCount + $failedOnceCount;
+
+    echo "Perfectly valid reports: {$perfectValidCount}" . PHP_EOL;
+    echo "Reports valid after problem dampener: {$problemDampenerCount}" . PHP_EOL;
+  }
+
+  private function isValidSequence(array $sequence): bool
+  {
+    if (count($sequence) < 2) {
+      return true;
+    }
+
+    $increasing = null;
+    for ($i = 1, $count = count($sequence); $i < $count; $i++) {
+      $diff = $sequence[$i] - $sequence[$i - 1];
+      $validDiff = abs($diff) >= 1 && abs($diff) <= 3;
+
+      if (!$validDiff) {
+        return false;
+      }
+
+      if ($increasing === null) {
+        $increasing = $diff > 0;
+      } elseif (($diff > 0) !== $increasing) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private function canBeMadeValid(array $sequence): bool
+  {
+    for ($i = 0, $count = count($sequence); $i < $count; $i++) {
+      $testSequence = array_values(array_filter($sequence, fn($key) => $key !== $i, ARRAY_FILTER_USE_KEY));
+
+      if ($this->isValidSequence($testSequence)) {
+        return true;
+      }
+    }
+    return false;
+  }
 }
-//print_r($reports);
-echo "Valid reports" . $validReports;
-// Correct answer is 479
+
+$validator = new ReportValidator('day2.input');
+$validator->validateReports();
