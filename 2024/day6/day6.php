@@ -1,35 +1,51 @@
 <?php
-// find the ^
-// Go up until you find a #
-// Turn 90 degrees clockwise
+
+namespace AdventOfCode2024\Day6;
+
+enum Direction: int
+{
+    case NORTH = 0;
+    case EAST = 1;
+    case SOUTH = 2;
+    case WEST = 3;
+}
 
 class GuardPatrol
 {
-    private array $map;
-    private int $rows;
-    private int $cols;
-    private array $visited;
-    private array $directions = [
-        'up' => [-1, 0],
-        'right' => [0, 1],
-        'down' => [1, 0],
-        'left' => [0, -1],
-    ];
-    private string $currentDirection = 'up';
-    private array $position;
+    private readonly array $directions;
+    private array $startPosition;
 
-    public function __construct(string $filePath)
-    {
-        $this->loadMap($filePath);
+    public function __construct(
+        private  array $map,
+        private readonly int $rows,
+        private readonly int $cols
+    ) {
+        $this->directions = [
+            Direction::NORTH->value => [-1, 0],
+            Direction::EAST->value => [0, 1],
+            Direction::SOUTH->value => [1, 0],
+            Direction::WEST->value => [0, -1],
+        ];
         $this->findStartPosition();
     }
 
-    private function loadMap(string $filePath): void
+    public static function fromFile(string $filePath): self
     {
-        $file = file_get_contents($filePath);
-        $this->map = array_map('str_split', explode(PHP_EOL, trim($file)));
-        $this->rows = count($this->map);
-        $this->cols = count($this->map[0]);
+        if (!file_exists($filePath)) {
+            throw new \RuntimeException("Input file not found: {$filePath}");
+        }
+
+        $content = file_get_contents($filePath);
+        if ($content === false) {
+            throw new \RuntimeException("Failed to read input file: {$filePath}");
+        }
+
+        $map = array_map('str_split', explode(PHP_EOL, trim($content)));
+        return new self(
+            map: $map,
+            rows: count($map),
+            cols: count($map[0])
+        );
     }
 
     private function findStartPosition(): void
@@ -37,99 +53,126 @@ class GuardPatrol
         for ($row = 0; $row < $this->rows; $row++) {
             for ($col = 0; $col < $this->cols; $col++) {
                 if ($this->map[$row][$col] === '^') {
-                    $this->position = [$row, $col];
-                    $this->visited[$row . ',' . $col] = true;
+                    $this->startPosition = [$row, $col];
                     $this->map[$row][$col] = '.';
                     return;
                 }
             }
         }
+        throw new \RuntimeException('No starting position found in map');
     }
 
-    public function simulatePatrol(): int
+    public function findLoopPositions(): array
     {
+        $positions = $this->moveForward($this->startPosition[0], $this->startPosition[1]);
+        if (!$positions) {
+            return [
+                'count' => 0,
+                'positions' => [],
+                'distinctCount' => 0
+            ];
+        }
 
-        $count = 0;
-        $isPatrolling = true;
+        $distinctPositions = [[$this->startPosition[0], $this->startPosition[1]]];
+        $loopPositions = [];
 
-        while ($isPatrolling) {
+        foreach ($positions as $p => $_) {
+            $row = $p >> 8;
+            $col = $p & 0xFF;
+            $distinctPositions[] = [$row, $col];
 
-            $nextLine = $this->position[0] + $this->directions[$this->currentDirection][0];
-            $nextCol = $this->position[1] + $this->directions[$this->currentDirection][1];
-
-            if (!$this->isValidPosition($nextLine, $nextCol)) {
-                $isPatrolling = false;
+            if ($this->shouldSkipPosition($row, $col)) {
                 continue;
             }
 
-            if ($this->isObstacle()) {
-                $this->turnRight();
-            } else {
-                if (!$this->moveForward()) {
-                    $isPatrolling = false;
-                    continue;
-                }
+            if ($this->createsLoop($row, $col)) {
+                $loopPositions[] = [$row, $col];
             }
-            $count++;
         }
 
-        echo "count: " . $count . PHP_EOL;
+        return [
+            'count' => count($loopPositions),
+            'positions' => $loopPositions,
+            'distinctCount' => count($distinctPositions)
+        ];
+    }
 
-        echo "Visited: " . PHP_EOL;
-        foreach (array_keys($this->visited) as $location) {
-            echo $location . PHP_EOL;
+    private function shouldSkipPosition(int $row, int $col): bool
+    {
+        return $this->map[$row][$col] === '#' ||
+            ($row === $this->startPosition[0] && $col === $this->startPosition[1]);
+    }
+
+    private function createsLoop(int $row, int $col): bool
+    {
+        $this->map[$row][$col] = '#';
+        $result = !$this->moveForward($this->startPosition[0], $this->startPosition[1]);
+        $this->map[$row][$col] = '.';
+        return $result;
+    }
+
+    private function moveForward(int $startRow, int $startCol): array|false
+    {
+        $dir = Direction::NORTH->value;
+        $visited = [];
+        $currentPosition = ['row' => $startRow, 'col' => $startCol];
+
+        while ($this->canMove($currentPosition, $dir)) {
+            $nextPosition = $this->calculateNextPosition($currentPosition, $dir);
+
+            if ($this->isObstacle($nextPosition)) {
+                $dir = ($dir + 1) % 4;
+                continue;
+            }
+
+            $currentPosition = $nextPosition;
+            $hash = ($currentPosition['row'] << 8) + $currentPosition['col'];
+
+            if (!isset($visited[$hash])) {
+                $visited[$hash] = 0;
+            } elseif ($visited[$hash] & (1 << $dir)) {
+                return false;
+            }
+
+            $visited[$hash] |= (1 << $dir);
         }
 
-
-        print_r($this->visited);
-
-        return count($this->visited);
+        return $visited;
     }
 
-    private function isObstacle(): bool
+    private function canMove(array $position, int $dir): bool
     {
-        $nextLine = $this->position[0] + $this->directions[$this->currentDirection][0];
-        $nextCol = $this->position[1] + $this->directions[$this->currentDirection][1];
-
-
-        return !$this->isValidPosition($nextLine, $nextCol) || $this->map[$nextLine][$nextCol] === '#';
+        $next = $this->calculateNextPosition($position, $dir);
+        return $next['row'] >= 0 &&
+            $next['col'] >= 0 &&
+            $next['row'] < $this->rows &&
+            $next['col'] < $this->cols;
     }
 
-    private function isValidPosition(int $row, int $col): bool
+    private function calculateNextPosition(array $position, int $dir): array
     {
-        return $row >= 0 && $row < $this->rows && $col >= 0 && $col < $this->cols;
+        return [
+            'row' => $position['row'] + $this->directions[$dir][0],
+            'col' => $position['col'] + $this->directions[$dir][1]
+        ];
     }
-    private function turnRight(): void
-    {
-        $this->currentDirection = match ($this->currentDirection) {
-            'up' => 'right',
-            'right' => 'down',
-            'down' => 'left',
-            'left' => 'up',
-        };
-    }
-    private function moveForward(): bool
-    {
-        $nextLine = $this->position[0] + $this->directions[$this->currentDirection][0];
-        $nextCol = $this->position[1] + $this->directions[$this->currentDirection][1];
 
-        if (!$this->isValidPosition($nextLine, $nextCol)) {
-            return false;
-        }
-
-        $this->position = [$nextLine, $nextCol];
-        $key = $nextLine . ',' . $nextCol;
-        if (!isset($this->visited[$key])) {
-            $this->visited[$key] = true;
-        }
-        return true;
+    private function isObstacle(array $position): bool
+    {
+        return $this->map[$position['row']][$position['col']] === '#';
     }
 }
 
-
 try {
-    $guardPatrol = new GuardPatrol('day6ex.input');
-    echo 'Distinct positions: ' . $guardPatrol->simulatePatrol();
-} catch (Exception $e) {
-    echo $e->getMessage();
+    $guardPatrol = GuardPatrol::fromFile('day6.input');
+    $result = $guardPatrol->findLoopPositions();
+
+    echo sprintf(
+        "Distinct positions visited: %d\nNumber of possible loop positions: %d\n",
+        $result['distinctCount'],
+        $result['count']
+    );
+} catch (\Exception $e) {
+    echo "Error: {$e->getMessage()}\n";
+    exit(1);
 }
