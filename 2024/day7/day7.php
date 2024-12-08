@@ -61,16 +61,28 @@ class BridgeRepair
 
         foreach ($combinations as $operators) {
             $result = $numbers[0];
-            for ($i = 0; $i < $operatorCount; $i++) {
-                $result = $this->applyOperator($result, $numbers[$i + 1], $operators[$i]);
-            }
-
+            $result = $this->validateExpression($numbers, $operators);
             if ($result === $testValue) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private function validateExpression(array $numbers, array $operators): int
+    {
+        $result = $numbers[0];
+        $currentNumber = $result;
+        for ($i = 0; $i < count($operators); $i++) {
+            if ($operators[$i] === '||') {
+                $currentNumber = (int)($currentNumber . $numbers[$i + 1]);
+            } else {
+                $currentNumber = $this->applyOperator($currentNumber, $numbers[$i + 1], $operators[$i]);
+            }
+            $result = $currentNumber;
+        }
+        return $result;
     }
 
     private function applyOperator(int $num1, int $num2, string $operator): int
@@ -84,7 +96,7 @@ class BridgeRepair
 
     private function allPossibleCombinations(int $length): array
     {
-        $operators = ['+', '*'];
+        $operators = ['+', '*', '||'];
         $combinations = [];
         $total = pow(count($operators), $length);
 
@@ -93,8 +105,8 @@ class BridgeRepair
             $num = $i;
 
             for ($j = 0; $j < $length; $j++) {
-                $combination[] = $operators[$num % 2];
-                $num = (int)($num / 2);
+                $combination[] = $operators[$num % 3];
+                $num = (int)($num / 3);
             }
             $combinations[] = $combination;
         }
@@ -108,5 +120,5 @@ try {
     $bridgeRepair = BridgeRepair::fromFile('day7.txt');
     echo "Total calibration result: " . $bridgeRepair->getTotalCalibrationResult();
 } catch (\Throwable $th) {
-    //throw $th;
+    echo "Error: " . $th->getMessage();
 }
