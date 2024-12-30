@@ -36,7 +36,7 @@ final class File extends AbstractSector
     }
 }
 
-final class PerBlockDefragmenter implements DefragmentationMethodInterface
+final class BlockDefragmenter implements DefragmentationMethodInterface
 {
     public function defragment(FilesystemInterface $filesystem): void
     {
@@ -87,6 +87,105 @@ final class PerBlockDefragmenter implements DefragmentationMethodInterface
 
         $filesystem->setSector($freeIdx, $fileData);
         $filesystem->setSector($fileIdx, $freeData);
+    }
+}
+
+final class WholeFileDefragmenter implements DefragmentationMethodInterface
+{
+    public function defragment(FilesystemInterface $filesystem): void
+    {
+        $partition = $filesystem->getPartition();
+        $filePositions = [];
+
+        // First, map file IDs to their starting positions
+        foreach ($partition as $index => $sector) {
+            if ($sector instanceof File) {
+                $fileId = $sector->getId();
+                if (!isset($filePositions[$fileId])) {
+                    $filePositions[$fileId] = $index;
+                }
+            }
+        }
+
+        // Sort by file ID in descending order
+        krsort($filePositions);
+
+        // Process each file
+        foreach ($filePositions as $fileId => $startIndex) {
+            $fileSize = $this->getFileSize($partition, $startIndex);
+            $freeSpaceSpan = $this->findLeftmostFreeSpaceSpan($filesystem, $startIndex, $fileSize);
+
+            if ($freeSpaceSpan !== null && $freeSpaceSpan['start'] < $startIndex) {
+                $this->moveFileToFreeSpace($filesystem, $startIndex, $freeSpaceSpan, $fileSize);
+            }
+        }
+    }
+
+    private function findLeftmostFreeSpaceSpan(
+        FilesystemInterface $filesystem,
+        int $fileIndex,
+        int $requiredSize
+    ): ?array {
+        $partition = $filesystem->getPartition();
+        $currentSpanStart = null;
+        $currentSpanSize = 0;
+
+        // Look for free space spans before the current file
+        for ($i = 0; $i < $fileIndex; $i++) {
+            if ($partition[$i] instanceof FreeSpace) {
+                if ($currentSpanStart === null) {
+                    $currentSpanStart = $i;
+                }
+                $currentSpanSize++;
+
+                if ($currentSpanSize >= $requiredSize) {
+                    return [
+                        'start' => $currentSpanStart,
+                        'size' => $requiredSize
+                    ];
+                }
+            } else {
+                $currentSpanStart = null;
+                $currentSpanSize = 0;
+            }
+        }
+
+        return null;
+    }
+
+    private function moveFileToFreeSpace(
+        FilesystemInterface $filesystem,
+        int $fileIndex,
+        array $freeSpaceSpan,
+        int $fileSize
+    ): void {
+        $file = $filesystem->getSector($fileIndex);
+
+        // Move file to free space
+        for ($i = 0; $i < $fileSize; $i++) {
+            $filesystem->setSector($freeSpaceSpan['start'] + $i, $file);
+            $filesystem->setSector($fileIndex + $i, new FreeSpace());
+        }
+    }
+
+    private function getFileSize(array $partition, int $startIndex): int
+    {
+        if (!($partition[$startIndex] instanceof File)) {
+            return 0;
+        }
+
+        $size = 0;
+        $fileId = $partition[$startIndex]->getId();
+
+        for ($i = $startIndex; $i < count($partition); $i++) {
+            if ($partition[$i] instanceof File && $partition[$i]->getId() === $fileId) {
+                $size++;
+            } else {
+                break;
+            }
+        }
+
+        return $size;
     }
 }
 
@@ -168,12 +267,19 @@ final class Filesystem implements FilesystemInterface
 }
 
 try {
-    $filesystem = new Filesystem(
+    // Part 1
+    $filesystem1 = new Filesystem(
         __DIR__ . '/day9.txt',
-        new PerBlockDefragmenter()
+        new BlockDefragmenter()
     );
+    echo "Part 1: " . $filesystem1->defragment()->getChecksum() . PHP_EOL;
 
-    echo $filesystem->defragment()->getChecksum() . PHP_EOL;
+    // Part 2
+    $filesystem2 = new Filesystem(
+        __DIR__ . '/day9.txt',
+        new WholeFileDefragmenter()
+    );
+    echo "Part 2: " . $filesystem2->defragment()->getChecksum() . PHP_EOL;
 } catch (\Throwable $e) {
     echo "Error: {$e->getMessage()}" . PHP_EOL;
     exit(1);
